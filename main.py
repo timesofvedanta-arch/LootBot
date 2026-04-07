@@ -10,8 +10,8 @@ from threading import Thread
 from datetime import datetime
 
 # --- 1. CONFIGURATION ---
-API_TOKEN = os.environ.get("API_TOKEN", "YOUR_BOT_TOKEN") 
-ADMIN_ID = int(os.environ.get("ADMIN_ID", 123456789)) 
+API_TOKEN = '8774434240:AAGBJx186xIRpbNli0_SklGTLw46fCqKts4'
+ADMIN_ID = 1216607288
 bot = TeleBot(API_TOKEN)
 app = Flask('')
 
