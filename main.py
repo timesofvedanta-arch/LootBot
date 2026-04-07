@@ -6,7 +6,7 @@ from flask import Flask
 from threading import Thread
 
 # --- 1. CONFIGURATION ---
-API_TOKEN = "YOUR_BOT_TOKEN"  # अपना टोकन यहाँ डालें
+API_TOKEN = "8774434240:AAGBJx186xIRpbNli0_SklGTLw46fCqKts4"  # अपना टोकन यहाँ डालें
 ADMIN_ID = 123456789          # अपनी आईडी यहाँ डालें
 bot = telebot.TeleBot(API_TOKEN)
 app = Flask(__name__)
