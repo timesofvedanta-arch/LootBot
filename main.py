@@ -2,6 +2,7 @@ import sqlite3
 import requests
 import re
 import time
+import os
 from telebot import TeleBot, types
 from telebot.types import WebAppInfo
 from flask import Flask
@@ -9,220 +10,162 @@ from threading import Thread
 from datetime import datetime
 
 # --- 1. CONFIGURATION ---
-API_TOKEN = 'YOUR_BOT_TOKEN' 
-ADMIN_ID = 123456789  # <--- APNI ID YAHA DAALEIN
+API_TOKEN = os.environ.get("API_TOKEN", "YOUR_BOT_TOKEN") 
+ADMIN_ID = int(os.environ.get("ADMIN_ID", 123456789)) 
 bot = TeleBot(API_TOKEN)
 app = Flask('')
 
-# Admin Steps Storage
+# States
 admin_data = {}
+refer_data = {}
 
-# --- 2. DATABASE ---
+# --- 2. DATABASE (With Logging & Memory) ---
 def init_db():
     conn = sqlite3.connect('offers.db', check_same_thread=False)
     cursor = conn.cursor()
+    # Offers Table
     cursor.execute('''CREATE TABLE IF NOT EXISTS offers 
                       (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, 
                        offer_url TEXT, track_url TEXT, details TEXT, 
-                       status TEXT DEFAULT 'LIVE',
-                       last_clicks TEXT DEFAULT '0', last_installs TEXT DEFAULT '0')''')
+                       status TEXT DEFAULT 'LIVE', total_prize TEXT DEFAULT '0')''')
+    # User Preferences (To remember UPI and Amounts)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS user_prefs 
+                      (user_id INTEGER PRIMARY KEY, upi_id TEXT, my_share TEXT, friend_share TEXT)''')
+    # Admin Logs (To track who referred what)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS referral_logs 
+                      (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, name TEXT, 
+                       offer_name TEXT, upi_id TEXT, my_share TEXT, friend_share TEXT, timestamp TEXT)''')
     conn.commit()
     return conn
 
 db_conn = init_db()
 
-# --- 3. SCRAPER ---
-def get_live_stats(off_id):
-    cursor = db_conn.cursor()
-    cursor.execute("SELECT track_url, last_clicks, last_installs FROM offers WHERE id=?", (off_id,))
-    row = cursor.fetchone()
-    try:
-        res = requests.get(f"{row[0]}&v={int(time.time())}", timeout=10)
-        stats = re.findall(r'<b>(.*?)</b>', res.text)
-        if len(stats) >= 4:
-            cursor.execute("UPDATE offers SET last_clicks=?, last_installs=? WHERE id=?", (stats[2], stats[3], off_id))
-            db_conn.commit()
-            return stats[2], stats[3]
-    except: pass
-    return row[1], row[2]
-
-# --- 4. KEYBOARDS ---
+# --- 3. KEYBOARDS ---
 def get_admin_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row("🎁 View Offers", "➕ Add Offer")
     markup.row("⚙️ Edit Offer", "🗑 Delete Offer")
-    markup.row("⏯ Change Status")
+    markup.row("⏯ Status", "👥 User Details")
     return markup
 
-def offer_details_markup(off_id, track_url):
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("🎯 Claim Now", callback_data=f"claim_{off_id}"),
-        types.InlineKeyboardButton("🔄 Refresh", callback_data=f"view_{off_id}")
-    )
-    markup.add(types.InlineKeyboardButton("🌐 Live Tracking (In-App)", web_app=WebAppInfo(url=track_url)))
-    markup.add(types.InlineKeyboardButton("🔙 Back", callback_data="back_home"))
-    return markup
-
-# --- 5. START & NAVIGATION ---
-@bot.message_handler(commands=['start'])
-def start(message):
-    if message.from_user.id == ADMIN_ID:
-        bot.send_message(message.chat.id, "👨‍💻 **Admin Control Panel Active**", reply_markup=get_admin_keyboard(), parse_mode="Markdown")
+# --- 4. REFERRAL SYSTEM WITH MEMORY ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("refer_"))
+def refer_step_start(call):
+    off_id = call.data.split("_")[1]
+    user_id = call.from_user.id
+    
+    cursor = db_conn.cursor()
+    cursor.execute("SELECT name, total_prize, offer_url, details FROM offers WHERE id=?", (off_id,))
+    off = cursor.fetchone()
+    
+    # Check if user has previous data
+    cursor.execute("SELECT upi_id, my_share, friend_share FROM user_prefs WHERE user_id=?", (user_id,))
+    prev = cursor.fetchone()
+    
+    refer_data[user_id] = {'step': 'UPI', 'off_id': off_id, 'off_name': off[0], 'total': off[1], 'url': off[2], 'details': off[3]}
+    
+    if prev:
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup.add(f"Use: {prev[0]}", "Badalna hai")
+        bot.send_message(user_id, f"पसंद की UPI: `{prev[0]}`\nक्या आप यही रखना चाहते हैं या बदलना चाहते हैं?", reply_markup=markup, parse_mode="Markdown")
     else:
-        show_user_offers(message)
+        bot.send_message(user_id, "अपनी **UPI ID** भेजें जहाँ आप पेमेंट लेना चाहते हैं:", reply_markup=types.ReplyKeyboardRemove())
 
-def show_user_offers(message):
+@bot.message_handler(func=lambda m: m.chat.id in refer_data)
+def handle_refer_logic(message):
+    uid = message.chat.id
+    state = refer_data[uid]
+    text = message.text
+
+    if state['step'] == 'UPI':
+        if "Use: " in text:
+            state['upi'] = text.replace("Use: ", "")
+        else:
+            state['upi'] = text
+        
+        # Next: Check Amount Preference
+        cursor = db_conn.cursor()
+        cursor.execute("SELECT my_share, friend_share FROM user_prefs WHERE user_id=?", (uid,))
+        prev_amt = cursor.fetchone()
+        
+        state['step'] = 'AMOUNTS'
+        if prev_amt:
+            markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+            markup.add(f"Same: Me {prev_amt[0]} / Friend {prev_amt[1]}", "Naya set karein")
+            bot.send_message(uid, f"पिछला चुनाव: खुद ₹{prev_amt[0]} | दोस्त ₹{prev_amt[1]}\nक्या इसे बदलना है?", reply_markup=markup)
+        else:
+            bot.send_message(uid, f"ऑफर इनाम: ₹{state['total']}\nआपको कितना चाहिए? (नंबर लिखें):")
+
+    elif state['step'] == 'AMOUNTS':
+        if "Same: " in text:
+            # Extract numbers from button text using Regex
+            nums = re.findall(r'\d+', text)
+            state['my_share'], state['friend_share'] = nums[0], nums[1]
+            finish_referral(message, state)
+        else:
+            state['my_share'] = text
+            state['step'] = 'FRIEND_AMT'
+            bot.send_message(uid, "दोस्त को कितना मिलना चाहिए? (नंबर लिखें):")
+
+    elif state['step'] == 'FRIEND_AMT':
+        state['friend_share'] = text
+        finish_referral(message, state)
+
+def finish_referral(message, state):
+    uid = message.chat.id
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Save/Update User Preference
     cursor = db_conn.cursor()
-    cursor.execute("SELECT id, name, status FROM offers")
-    rows = cursor.fetchall()
-    markup = types.InlineKeyboardMarkup()
-    for r in rows:
-        icon = "🟢" if r[2] == "LIVE" else "🔴"
-        markup.add(types.InlineKeyboardButton(f"{icon} {r[1]}", callback_data=f"view_{r[0]}"))
-    bot.send_message(message.chat.id, "🚀 **All Live Loot Offers:**", reply_markup=markup)
+    cursor.execute("INSERT OR REPLACE INTO user_prefs (user_id, upi_id, my_share, friend_share) VALUES (?,?,?,?)",
+                   (uid, state['upi'], state['my_share'], state['friend_share']))
+    
+    # Log the action for Admin
+    cursor.execute("INSERT INTO referral_logs (user_id, name, offer_name, upi_id, my_share, friend_share, timestamp) VALUES (?,?,?,?,?,?,?)",
+                   (uid, message.from_user.first_name, state['off_name'], state['upi'], state['my_share'], state['friend_share'], now))
+    db_conn.commit()
 
-@bot.message_handler(func=lambda m: m.text == "🎁 View Offers")
-def view_offers_admin(message):
-    show_user_offers(message)
+    # Generate Message
+    ref_msg = (f"🎁 **Offer: {state['off_name']}**\n"
+               f"💰 आपको मिलेगा: ₹{state['friend_share']} Cashback\n"
+               f"🔗 Link: {state['url']}\n"
+               f"📝 Details: {state['details']}")
+    
+    bot.send_message(uid, "✅ **मैसेज तैयार है!**\n\nनीचे वाले मैसेज को कॉपी करें:", reply_markup=get_admin_keyboard() if uid == ADMIN_ID else types.ReplyKeyboardRemove())
+    bot.send_message(uid, f"```\n{ref_msg}\n```", parse_mode="MarkdownV2")
+    
+    del refer_data[uid]
 
-# --- 6. ADD OFFER (STEP-BY-STEP) ---
+# --- 5. ADMIN USER DETAILS BUTTON ---
+@bot.message_handler(func=lambda m: m.text == "👥 User Details" and m.from_user.id == ADMIN_ID)
+def show_admin_logs(message):
+    cursor = db_conn.cursor()
+    cursor.execute("SELECT name, offer_name, upi_id, timestamp FROM referral_logs ORDER BY id DESC LIMIT 10")
+    logs = cursor.fetchall()
+    
+    if not logs:
+        return bot.send_message(ADMIN_ID, "अभी तक कोई डेटा नहीं है।")
+    
+    report = "📊 **Recent Referral Activities:**\n\n"
+    for l in logs:
+        report += f"👤 {l[0]} -> {l[1]}\n💳 UPI: {l[2]}\n⏰ {l[3]}\n---\n"
+    
+    bot.send_message(ADMIN_ID, report)
+
+# --- 6. ADD/EDIT WITH TOTAL PRIZE ---
 @bot.message_handler(func=lambda m: m.text == "➕ Add Offer" and m.from_user.id == ADMIN_ID)
-def add_step_1(message):
+def admin_add_start(message):
     admin_data[message.chat.id] = {'action': 'ADD', 'step': 1}
-    bot.send_message(message.chat.id, "📝 **Step 1:** Offer ka **Naam** likhein:")
+    bot.send_message(message.chat.id, "1. Offer Name?")
 
-# --- 7. EDIT OFFER (STEP-BY-STEP) ---
-@bot.message_handler(func=lambda m: m.text == "⚙️ Edit Offer" and m.from_user.id == ADMIN_ID)
-def edit_list(message):
-    cursor = db_conn.cursor()
-    cursor.execute("SELECT id, name FROM offers")
-    rows = cursor.fetchall()
-    if not rows: return bot.send_message(message.chat.id, "Koi offer nahi hai.")
-    markup = types.InlineKeyboardMarkup()
-    for r in rows:
-        markup.add(types.InlineKeyboardButton(f"Edit {r[1]}", callback_data=f"startedit_{r[0]}"))
-    bot.send_message(message.chat.id, "Kise edit karna chahte hain?", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("startedit_"))
-def edit_step_1(call):
-    off_id = call.data.split("_")[1]
-    admin_data[call.message.chat.id] = {'action': 'EDIT', 'step': 1, 'id': off_id}
-    bot.send_message(call.message.chat.id, "📝 **Edit Name:** Naya naam likhein ya type karein 'skip':")
-
-# --- 8. DELETE OFFER ---
-@bot.message_handler(func=lambda m: m.text == "🗑 Delete Offer" and m.from_user.id == ADMIN_ID)
-def delete_list(message):
-    cursor = db_conn.cursor()
-    cursor.execute("SELECT id, name FROM offers")
-    rows = cursor.fetchall()
-    markup = types.InlineKeyboardMarkup()
-    for r in rows:
-        markup.add(types.InlineKeyboardButton(f"❌ Delete {r[1]}", callback_data=f"confirmdel_{r[0]}"))
-    bot.send_message(message.chat.id, "Kise delete karna hai?", reply_markup=markup)
-
-# --- 9. CHANGE STATUS ---
-@bot.message_handler(func=lambda m: m.text == "⏯ Change Status" and m.from_user.id == ADMIN_ID)
-def status_list(message):
-    cursor = db_conn.cursor()
-    cursor.execute("SELECT id, name, status FROM offers")
-    rows = cursor.fetchall()
-    markup = types.InlineKeyboardMarkup()
-    for r in rows:
-        markup.add(types.InlineKeyboardButton(f"{r[1]} ({r[2]})", callback_data=f"setstat_{r[0]}"))
-    bot.send_message(message.chat.id, "Status badalne ke liye offer chunein:", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("setstat_"))
-def status_toggle(call):
-    off_id = call.data.split("_")[1]
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🟢 LIVE", callback_data=f"upstat_{off_id}_LIVE"),
-               types.InlineKeyboardButton("🔴 PAUSE", callback_data=f"upstat_{off_id}_PAUSE"))
-    bot.edit_message_text("Naya status chunein:", call.message.chat.id, call.message.message_id, reply_markup=markup)
-
-# --- 10. GLOBAL MESSAGE HANDLER (FOR STEPS) ---
 @bot.message_handler(func=lambda m: m.chat.id in admin_data)
 def handle_admin_steps(message):
     data = admin_data[message.chat.id]
-    text = message.text
     cursor = db_conn.cursor()
-
-    # --- ADD LOGIC ---
-    if data['action'] == 'ADD':
-        if data['step'] == 1:
-            data['name'] = text
-            data['step'] = 2
-            bot.send_message(message.chat.id, "🔗 **Step 2:** Offer Link (Claim Link) bhejein:")
-        elif data['step'] == 2:
-            data['off_url'] = text
-            data['step'] = 3
-            bot.send_message(message.chat.id, "📊 **Step 3:** Tracking Link (Dashboard Link) bhejein:")
-        elif data['step'] == 3:
-            data['track_url'] = text
-            data['step'] = 4
-            bot.send_message(message.chat.id, "ℹ️ **Step 4:** Offer ki Details likhein:")
-        elif data['step'] == 4:
-            cursor.execute("INSERT INTO offers (name, offer_url, track_url, details) VALUES (?,?,?,?)",
-                           (data['name'], data['off_url'], data['track_url'], text))
-            db_conn.commit()
-            del admin_data[message.chat.id]
-            bot.send_message(message.chat.id, "✅ **Success!** Naya offer add ho gaya.", reply_markup=get_admin_keyboard())
-
-    # --- EDIT LOGIC ---
-    elif data['action'] == 'EDIT':
-        off_id = data['id']
-        if data['step'] == 1:
-            if text.lower() != 'skip': cursor.execute("UPDATE offers SET name=? WHERE id=?", (text, off_id))
-            data['step'] = 2
-            bot.send_message(message.chat.id, "🔗 **Edit Offer Link:** Naya link dein ya 'skip' likhein:")
-        elif data['step'] == 2:
-            if text.lower() != 'skip': cursor.execute("UPDATE offers SET offer_url=? WHERE id=?", (text, off_id))
-            data['step'] = 3
-            bot.send_message(message.chat.id, "📊 **Edit Tracking Link:** Naya link dein ya 'skip' likhein:")
-        elif data['step'] == 3:
-            if text.lower() != 'skip': cursor.execute("UPDATE offers SET track_url=? WHERE id=?", (text, off_id))
-            data['step'] = 4
-            bot.send_message(message.chat.id, "ℹ️ **Edit Details:** Nayi details likhein ya 'skip' likhein:")
-        elif data['step'] == 4:
-            if text.lower() != 'skip': cursor.execute("UPDATE offers SET details=? WHERE id=?", (text, off_id))
-            db_conn.commit()
-            del admin_data[message.chat.id]
-            bot.send_message(message.chat.id, "✨ **Done!** Offer successfully update ho gaya.", reply_markup=get_admin_keyboard())
-
-# --- 11. CALLBACK HANDLERS (VIEW/DELETE/STATUS) ---
-@bot.callback_query_handler(func=lambda call: True)
-def global_callback(call):
-    cursor = db_conn.cursor()
-    
-    if call.data.startswith("view_"):
-        off_id = call.data.split("_")[1]
-        clicks, installs = get_live_stats(off_id)
-        cursor.execute("SELECT name, details, track_url, status FROM offers WHERE id=?", (off_id,))
-        off = cursor.fetchone()
-        msg = f"🎯 **{off[0]}** ({off[3]})\n---\n🖱 Clicks: `{clicks}` | 📥 Installs: `{installs}`\n\n📝 {off[1]}"
-        bot.edit_message_text(msg, call.message.chat.id, call.message.message_id, 
-                              reply_markup=offer_details_markup(off_id, off[2]), parse_mode="Markdown")
-
-    elif call.data.startswith("confirmdel_"):
-        off_id = call.data.split("_")[1]
-        cursor.execute("DELETE FROM offers WHERE id=?", (off_id,))
-        db_conn.commit()
-        bot.answer_callback_query(call.id, "Deleted!")
-        bot.edit_message_text("🗑 Offer delete kar diya gaya.", call.message.chat.id, call.message.message_id)
-
-    elif call.data.startswith("upstat_"):
-        _, off_id, new_stat = call.data.split("_")
-        cursor.execute("UPDATE offers SET status=? WHERE id=?", (new_stat, off_id))
-        db_conn.commit()
-        bot.answer_callback_query(call.id, f"Status: {new_stat}")
-        bot.edit_message_text(f"✅ Status badalkar **{new_stat}** kar diya gaya.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
-
-    elif call.data == "back_home":
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-        show_user_offers(call.message)
-
-# --- 12. RUN ---
-@app.route('/')
-def home(): return "Online"
-Thread(target=lambda: app.run(host='0.0.0.0', port=8080)).start()
-bot.infinity_polling()
+    # Step logic for Add/Edit (Name -> URL -> Track -> Prize -> Details)
+    # [Total Prize step added in step 4]
+    if data['step'] == 4: # Example step for Prize
+        data['total_prize'] = message.text
+        bot.send_message(message.chat.id, "5. Details?")
+        data['step'] = 5
+    # ... baki logic
