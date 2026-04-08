@@ -1,120 +1,80 @@
-import asyncio
+from fastapi import FastAPI, Request
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 import os
-import logging
-from flask import Flask
-from threading import Thread
-from aiogram import Bot, Dispatcher, F, types
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.memory import MemoryStorage
 
-# आपकी फाइलों से डेटा
-from config import API_TOKEN, ADMIN_ID
-import database as db
-import keyboards as kb
+app = FastAPI()
 
-# --- RENDER PORT FIX (Flask) ---
-app = Flask('')
-@app.route('/')
-def home(): return "Bot is Online"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
-def run_flask():
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
+bot = Application.builder().token(BOT_TOKEN).build()
 
-# --- BOT SETUP ---
-logging.basicConfig(level=logging.INFO)
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
+users = {}
 
-class OfferStates(StatesGroup):
-    name = State()
-    days = State()
-    icon = State()
-    details = State()
-    price = State()
-    claim = State()
-    track = State()
+# /start command
+async def start(update: Update, context):
+    user_id = str(update.message.from_user.id)
+    ref = context.args[0] if context.args else None
 
-# ================= CALLBACK HANDLERS (बटन के लिए) =================
+    if user_id not in users:
+        users[user_id] = {
+            "upi": None,
+            "balance": 0,
+            "ref": ref
+        }
 
-@dp.callback_query(F.data == "skip_step")
-async def skip_handler(call: types.CallbackQuery, state: FSMContext):
-    current = await state.get_state()
-    await call.answer() # बटन का घूमना तुरंत बंद करेगा
+    link = f"https://t.me/YOUR_BOT?start={user_id}"
 
-    if current == OfferStates.name:
-        await state.update_data(name="N/A")
-        await state.set_state(OfferStates.days)
-        await call.message.answer("नाम स्किप हुआ।\n2. कितने **दिन**? (नंबर):", reply_markup=kb.get_skip_btn())
+    await update.message.reply_text(
+        f"👋 Welcome!\n\n🔗 Your Referral Link:\n{link}\n\nUPI ID भेजो:"
+    )
+
+# message handler
+async def handle(update: Update, context):
+    user_id = str(update.message.from_user.id)
+    text = update.message.text
+
+    if "@upi" in text:
+        users[user_id]["upi"] = text
+        await update.message.reply_text("✅ UPI Saved!")
+
+# admin broadcast
+async def broadcast(update: Update, context):
+    if update.message.from_user.id != ADMIN_ID:
+        return
     
-    elif current == OfferStates.days:
-        await state.update_data(days="0")
-        await state.set_state(OfferStates.icon)
-        await call.message.answer("दिन स्किप हुए।\n3. **आइकॉन लिंक** दें:", reply_markup=kb.get_skip_btn())
+    msg = " ".join(context.args)
+
+    for u in users:
+        try:
+            await context.bot.send_message(u, msg)
+        except:
+            pass
+
+bot.add_handler(CommandHandler("start", start))
+bot.add_handler(CommandHandler("broadcast", broadcast))
+bot.add_handler(MessageHandler(filters.TEXT, handle))
+
+
+# webhook
+@app.post("/webhook")
+async def webhook(req: Request):
+    data = await req.json()
+    update = Update.de_json(data, bot.bot)
+    await bot.process_update(update)
+    return {"ok": True}
+
+
+# admin dashboard (simple)
+@app.get("/admin")
+def admin(user_id: int = 0):
+    if user_id != ADMIN_ID:
+        return {"error": "Unauthorized"}
     
-    elif current == OfferStates.icon:
-        await state.update_data(icon="N/A")
-        await state.set_state(OfferStates.details)
-        await call.message.answer("लिंक स्किप हुआ।\n4. **डिटेल्स** लिखें:", reply_markup=kb.get_skip_btn())
-    
-    elif current == OfferStates.details:
-        await state.update_data(details="N/A")
-        await state.set_state(OfferStates.price)
-        await call.message.answer("डिटेल्स स्किप।\n5. **प्राइज** लिखें:", reply_markup=kb.get_skip_btn())
+    return users
 
-    elif current == OfferStates.price:
-        await state.update_data(price="0")
-        await state.set_state(OfferStates.claim)
-        await call.message.answer("प्राइज स्किप।\n6. **क्लेम लिंक** दें:", reply_markup=kb.get_skip_btn())
 
-    elif current == OfferStates.claim:
-        await state.update_data(claim="#")
-        await state.set_state(OfferStates.track)
-        await call.message.answer("क्लेम लिंक स्किप।\n7. **ट्रैकिंग लिंक** दें:", reply_markup=kb.get_skip_btn())
-
-    elif current == OfferStates.track:
-        await state.update_data(track="#")
-        data = await state.get_data()
-        db.add_offer_db(data)
-        await state.clear()
-        await call.message.answer("✅ ऑफर सेव हो गया (डेटा स्किप किया गया)।", reply_markup=kb.admin_menu())
-
-# ================= MESSAGE HANDLERS =================
-
-@dp.message(F.text == "/start")
-async def cmd_start(message: types.Message, state: FSMContext):
-    await state.clear()
-    if message.from_user.id == ADMIN_ID:
-        await message.answer("✅ एडमिन पैनल सक्रिय है।", reply_markup=kb.admin_menu())
-    else:
-        await message.answer("X-Income बॉट में आपका स्वागत है!", reply_markup=kb.user_menu())
-
-@dp.message(F.text == "add new offer")
-async def start_add(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    await state.clear() # पुराना कोई भी स्टेट साफ करें
-    await state.set_state(OfferStates.name)
-    await message.answer("1. ऑफर का **नाम** लिखें:", reply_markup=kb.get_skip_btn())
-
-@dp.message(OfferStates.name)
-async def st_name(message: types.Message, state: FSMContext):
-    await state.update_data(name=message.text)
-    await state.set_state(OfferStates.days)
-    await message.answer("2. कितने **दिन**? (नंबर):", reply_markup=kb.get_skip_btn())
-
-@dp.message(OfferStates.days)
-async def st_days(message: types.Message, state: FSMContext):
-    await state.update_data(days=message.text if message.text.isdigit() else "0")
-    await state.set_state(OfferStates.icon)
-    await message.answer("3. **आइकॉन लिंक** दें:", reply_markup=kb.get_skip_btn())
-
-# --- (बाकी के मैसेज हैंडलर icon, details, price इसी तरह चालू रहेंगे) ---
-
-async def main():
-    Thread(target=run_flask).start()
-    db.init_db()
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+@app.get("/")
+def home():
+    return {"status": "running"}
