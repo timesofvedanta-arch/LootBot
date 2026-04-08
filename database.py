@@ -4,12 +4,10 @@ from datetime import datetime, timedelta
 def init_db():
     conn = sqlite3.connect('bot_data.db')
     cursor = conn.cursor()
-    # Offers Table
     cursor.execute('''CREATE TABLE IF NOT EXISTS offers 
         (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, status TEXT DEFAULT 'active', 
         expiry_date DATETIME, icon_url TEXT, details TEXT, claim_link TEXT, 
         track_link TEXT, price TEXT)''')
-    # Submissions Table
     cursor.execute('''CREATE TABLE IF NOT EXISTS submissions 
         (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, user_name TEXT, 
         offer_id INTEGER, offer_name TEXT, upi_id TEXT, amount TEXT, 
@@ -27,3 +25,11 @@ def add_offer_db(data):
                     data.get('price', '0'), data.get('claim', '#'), data.get('track', '#')))
     conn.commit()
     conn.close()
+
+def get_all_offers():
+    conn = sqlite3.connect('bot_data.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM offers WHERE status = 'active'")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
