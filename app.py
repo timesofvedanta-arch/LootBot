@@ -1,26 +1,26 @@
 import os, logging, sqlite3, http.server, socketserver, time
 from threading import Thread
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, ContextTypes, 
     CallbackQueryHandler, MessageHandler, filters, ConversationHandler
 )
 
-# MongoDB Functions Import
-from database import get_all_offers, save_offer, get_offer_by_id
+# MongoDB Functions
+from database import get_all_offers, save_offer, get_offer_by_id, delete_offer_by_id
 
 # --- CONFIGURATION ---
 ADMIN_ID = 1216607288  
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 DB_NAME = "timesofvedanta.db"
 
-# States (अब गिनती एकदम सही है - कुल 12)
-(A_NAME, A_STATUS, A_PRIZE, A_STEPS, A_TERMS, A_CLINK, A_TLINK, 
- U_SEL_OFF, U_SCREEN, U_UPI, E_SEL, E_VAL) = range(12)
+# States (आपके ओरिजिनल कोड के अनुसार 13 States)
+(A_NAME, A_STATUS, A_EXPIRY, A_PRIZE, A_STEPS, A_TERMS, A_CLINK, A_TLINK, 
+ U_SEL_OFF, U_SCREEN, U_UPI, E_SEL, E_VAL) = range(13)
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# --- DATABASE (SQLite for users/submissions) ---
+# --- DATABASE (SQLite for submissions/users) ---
 def db_query(query, params=(), fetch=False):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -76,12 +76,12 @@ async def u_det(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not o:
         await query.answer("Offer not found!")
         return
-    txt = f"📌 **{o['name']}**\n💰 Prize: ₹{o['prize']}\nStatus: {o['status']}\n\n📝 **Steps:**\n{o['steps']}\n\n⚠️ **Terms:**\n{o['terms']}"
-    btns = [[InlineKeyboardButton("🚀 Claim", url=o['claim_link']), InlineKeyboardButton("📍 Track", url=o['track_link'])],
+    txt = f"📌 **{o['name']}**\n💰 Prize: ₹{o['prize']}\nStatus: {o['status']}\nExp: {o['expiry']}\n\n📝 **Steps:**\n{o['steps']}\n\n⚠️ **Terms:**\n{o['terms']}"
+    btns = [[InlineKeyboardButton("🚀 Claim", web_app=WebAppInfo(url=o['claim_link'])), InlineKeyboardButton("📍 Track", web_app=WebAppInfo(url=o['track_link']))],
             [InlineKeyboardButton("🔙 Back", callback_data='u_offers')]]
     await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(btns), parse_mode='Markdown')
 
-# --- ADMIN: ADD OFFER ---
+# --- ADMIN: ADD OFFER (Oroginal Flow) ---
 async def a_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.message.reply_text("1️⃣ नाम:")
     return A_NAME
@@ -93,42 +93,45 @@ async def a_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def a_status_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['n_st'] = update.message.text
-    await update.message.reply_text("3️⃣ प्राइज (₹):")
+    await update.message.reply_text("3️⃣ एक्सपायरी:")
+    return A_EXPIRY
+
+async def a_exp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['n_ex'] = update.message.text
+    await update.message.reply_text("4️⃣ प्राइज (₹):")
     return A_PRIZE
 
 async def a_prz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['n_pr'] = update.message.text
-    await update.message.reply_text("4️⃣ स्टेप्स:")
+    await update.message.reply_text("5️⃣ स्टेप्स:")
     return A_STEPS
 
 async def a_stp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['n_step'] = update.message.text
-    await update.message.reply_text("5️⃣ शर्ते:")
+    await update.message.reply_text("6️⃣ शर्ते:")
     return A_TERMS
 
 async def a_trm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['n_term'] = update.message.text
-    await update.message.reply_text("6️⃣ क्लेम लिंक:")
+    await update.message.reply_text("7️⃣ क्लेम लिंक:")
     return A_CLINK
 
 async def a_cli(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['n_cl'] = update.message.text
-    await update.message.reply_text("7️⃣ ट्रैक लिंक:")
+    await update.message.reply_text("8️⃣ ट्रैक लिंक:")
     return A_TLINK
 
 async def a_fin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     d = context.user_data
-    t_link = update.message.text
-    oid = str(int(time.time())) 
-    save_offer(oid, d['n_name'], d['n_st'], d['n_pr'], d['n_step'], d['n_term'], d['n_cl'], t_link)
+    oid = str(int(time.time()))
+    save_offer(oid, d['n_name'], d['n_st'], d['n_ex'], d['n_pr'], d['n_step'], d['n_term'], d['n_cl'], update.message.text)
     await update.message.reply_text("✅ ऑफर जुड़ गया!", reply_markup=admin_kb())
     return ConversationHandler.END
 
-# --- GLOBAL CALLBACK HANDLER ---
+# --- GLOBAL CALLBACKS ---
 async def global_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    d = q.data
-    uid = q.from_user.id
+    d, uid = q.data, q.from_user.id
     from database import offers_col
     
     if d == 'home': await q.edit_message_text("मुख्य मेनू:", reply_markup=user_kb(uid))
@@ -142,15 +145,14 @@ async def global_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         btns.append([InlineKeyboardButton("🔙 Back", callback_data='a_panel')])
         await q.edit_message_text("🗑 डिलीट करने के लिए चुनें:", reply_markup=InlineKeyboardMarkup(btns))
     elif d.startswith('del_'):
-        oid = d.split('_')[1]
-        offers_col.delete_one({"id": oid})
+        delete_offer_by_id(d.split('_')[1])
         await q.answer("✅ डिलीट हो गया!")
         await q.edit_message_text("🛠 एडमिन पैनल:", reply_markup=admin_kb())
     elif d == 'a_status':
         offers = get_all_offers()
         btns = [[InlineKeyboardButton(f"{o['name']} ({o['status']})", callback_data=f"stch_{o['id']}")] for o in offers]
         btns.append([InlineKeyboardButton("🔙 Back", callback_data='a_panel')])
-        await q.edit_message_text("🔄 स्टेटस बदलने के लिए चुनें:", reply_markup=InlineKeyboardMarkup(btns))
+        await q.edit_message_text("🔄 स्टेटस बदलें:", reply_markup=InlineKeyboardMarkup(btns))
     elif d.startswith('stch_'):
         oid = d.split('_')[1]
         o = get_offer_by_id(oid)
@@ -166,22 +168,22 @@ async def global_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif d.startswith('rej_'):
         sid, usr = d.split('_')[1], d.split('_')[2]
         db_query("UPDATE submissions SET status='Rejected' WHERE id=?", (sid,))
-        await context.bot.send_message(usr, "❌ आपने स्टेप्स फॉलो नहीं किए, इसलिए रिजेक्ट हो गया।")
+        await context.bot.send_message(usr, "❌ रिजेक्ट हो गया।")
         await q.delete_message()
 
-# --- SUBMIT PROOFS ---
+# --- SUBMIT PROOF FLOW ---
 async def u_sub_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    offers = get_all_offers()
-    btns = [[InlineKeyboardButton(o['name'], callback_data=f"sub_{o['name']}")] for o in offers if o['status'] == 'Active']
-    if not btns:
+    offers = [o for o in get_all_offers() if o['status'] == 'Active']
+    if not offers:
         await update.callback_query.answer("कोई एक्टिव ऑफर नहीं है!", show_alert=True)
         return ConversationHandler.END
-    await update.callback_query.edit_message_text("✅ ऑफर चुनें जिसका प्रूफ देना है:", reply_markup=InlineKeyboardMarkup(btns))
+    btns = [[InlineKeyboardButton(o['name'], callback_data=f"sub_{o['name']}")] for o in offers]
+    await update.callback_query.edit_message_text("✅ ऑफर चुनें:", reply_markup=InlineKeyboardMarkup(btns))
     return U_SEL_OFF
 
 async def u_sub_sel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['sub_off'] = update.callback_query.data.split('_')[1]
-    await update.callback_query.edit_message_text("📸 अब स्क्रीनशॉट अपलोड करें:")
+    await update.callback_query.edit_message_text("📸 स्क्रीनशॉट भेजें:")
     return U_SCREEN
 
 async def u_sub_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -190,11 +192,9 @@ async def u_sub_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return U_UPI
 
 async def u_sub_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    upi = update.message.text
-    uid = update.effective_user.id
     db_query("INSERT INTO submissions (user_id, offer_name, upi, photo_id) VALUES (?,?,?,?)", 
-             (uid, context.user_data['sub_off'], upi, context.user_data['sub_img']))
-    await update.message.reply_text("✅ सबमिट हो गया!", reply_markup=user_kb(uid))
+             (update.effective_user.id, context.user_data['sub_off'], update.message.text, context.user_data['sub_img']))
+    await update.message.reply_text("✅ सबमिट हो गया!", reply_markup=user_kb(update.effective_user.id))
     return ConversationHandler.END
 
 async def a_proofs(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -203,8 +203,7 @@ async def a_proofs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.edit_message_text("कोई पेंडिंग प्रूफ नहीं है।", reply_markup=admin_kb())
         return
     for s in subs:
-        btns = [[InlineKeyboardButton("✅ Approve", callback_data=f'apr_{s[0]}_{s[1]}'),
-                 InlineKeyboardButton("❌ Reject", callback_data=f'rej_{s[0]}_{s[1]}')]]
+        btns = [[InlineKeyboardButton("✅ Approve", callback_data=f'apr_{s[0]}_{s[1]}'), InlineKeyboardButton("❌ Reject", callback_data=f'rej_{s[0]}_{s[1]}')]]
         await update.callback_query.message.reply_photo(s[4], caption=f"User: {s[1]}\nOffer: {s[2]}\nUPI: {s[3]}", reply_markup=InlineKeyboardMarkup(btns))
 
 def run_srv():
@@ -221,6 +220,7 @@ if __name__ == '__main__':
         states={
             A_NAME: [MessageHandler(filters.TEXT, a_name)],
             A_STATUS: [MessageHandler(filters.TEXT, a_status_input)],
+            A_EXPIRY: [MessageHandler(filters.TEXT, a_exp)],
             A_PRIZE: [MessageHandler(filters.TEXT, a_prz)],
             A_STEPS: [MessageHandler(filters.TEXT, a_stp)],
             A_TERMS: [MessageHandler(filters.TEXT, a_trm)],
