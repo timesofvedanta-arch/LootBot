@@ -5,7 +5,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppI
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 
 # --- CONFIGURATION ---
-ADMIN_ID = 123456789  # अपनी असली टेलीग्राम ID यहाँ डालें
+ADMIN_ID = 1216607288  # अपनी असली टेलीग्राम ID यहाँ डालें
 DB_NAME = "income_bot.db"
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
