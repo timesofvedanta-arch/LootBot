@@ -14,8 +14,8 @@ ADMIN_ID = 1216607288
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 DB_NAME = "timesofvedanta.db"
 
-# States
-(A_NAME, A_STATUS, A_EXPIRY, A_PRIZE, A_STEPS, A_TERMS, A_CLINK, A_TLINK, 
+# States (अब गिनती एकदम सही है - कुल 12)
+(A_NAME, A_STATUS, A_PRIZE, A_STEPS, A_TERMS, A_CLINK, A_TLINK, 
  U_SEL_OFF, U_SCREEN, U_UPI, E_SEL, E_VAL) = range(12)
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -81,7 +81,7 @@ async def u_det(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔙 Back", callback_data='u_offers')]]
     await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(btns), parse_mode='Markdown')
 
-# --- ADMIN FUNCTIONS (Add, Delete, Status) ---
+# --- ADMIN: ADD OFFER ---
 async def a_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.message.reply_text("1️⃣ नाम:")
     return A_NAME
@@ -124,7 +124,7 @@ async def a_fin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ ऑफर जुड़ गया!", reply_markup=admin_kb())
     return ConversationHandler.END
 
-# --- HANDLER ROUTER ---
+# --- GLOBAL CALLBACK HANDLER ---
 async def global_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     d = q.data
@@ -169,7 +169,7 @@ async def global_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(usr, "❌ आपने स्टेप्स फॉलो नहीं किए, इसलिए रिजेक्ट हो गया।")
         await q.delete_message()
 
-# (Submit Proof Functions, run_srv remain same as before)
+# --- SUBMIT PROOFS ---
 async def u_sub_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     offers = get_all_offers()
     btns = [[InlineKeyboardButton(o['name'], callback_data=f"sub_{o['name']}")] for o in offers if o['status'] == 'Active']
@@ -218,12 +218,25 @@ if __name__ == '__main__':
     
     app.add_handler(ConversationHandler(
         entry_points=[CallbackQueryHandler(a_add_start, pattern='^a_add$')],
-        states={A_NAME:[MessageHandler(filters.TEXT, a_name)], A_STATUS:[MessageHandler(filters.TEXT, a_status_input)], A_PRIZE:[MessageHandler(filters.TEXT, a_prz)], A_STEPS:[MessageHandler(filters.TEXT, a_stp)], A_TERMS:[MessageHandler(filters.TEXT, a_trm)], A_CLINK:[MessageHandler(filters.TEXT, a_cli)], A_TLINK:[MessageHandler(filters.TEXT, a_fin)]},
+        states={
+            A_NAME: [MessageHandler(filters.TEXT, a_name)],
+            A_STATUS: [MessageHandler(filters.TEXT, a_status_input)],
+            A_PRIZE: [MessageHandler(filters.TEXT, a_prz)],
+            A_STEPS: [MessageHandler(filters.TEXT, a_stp)],
+            A_TERMS: [MessageHandler(filters.TEXT, a_trm)],
+            A_CLINK: [MessageHandler(filters.TEXT, a_cli)],
+            A_TLINK: [MessageHandler(filters.TEXT, a_fin)]
+        },
         fallbacks=[CommandHandler("start", start)]
     ))
+    
     app.add_handler(ConversationHandler(
         entry_points=[CallbackQueryHandler(u_sub_start, pattern='^u_sub_start$')],
-        states={U_SEL_OFF:[CallbackQueryHandler(u_sub_sel, pattern='^sub_')], U_SCREEN:[MessageHandler(filters.PHOTO, u_sub_screen)], U_UPI:[MessageHandler(filters.TEXT, u_sub_upi)]},
+        states={
+            U_SEL_OFF: [CallbackQueryHandler(u_sub_sel, pattern='^sub_')],
+            U_SCREEN: [MessageHandler(filters.PHOTO, u_sub_screen)],
+            U_UPI: [MessageHandler(filters.TEXT, u_sub_upi)]
+        },
         fallbacks=[CommandHandler("start", start)]
     ))
     
