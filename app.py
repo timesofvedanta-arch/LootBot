@@ -134,7 +134,8 @@ def h(): return "Active", 200
 
 if __name__ == '__main__':
     init_db()
-    TOKEN = os.environ.get("BOT_TOKEN")
+    #TOKEN = os.environ.get("BOT_TOKEN")
+    TOKEN = 8797754610:AAHwDu7n6d1U2Ma682BkIHD68k3vRlIwguQ
     Thread(target=lambda: server.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))).start()
     app = ApplicationBuilder().token(TOKEN).build()
 
