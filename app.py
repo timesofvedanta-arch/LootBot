@@ -1,5 +1,8 @@
 import os, logging, sqlite3, http.server, socketserver
 from threading import Thread
+# नीचे वाली लाइन जोड़ें
+from database import get_all_offers, save_offer, get_offer_by_id
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, ContextTypes, 
@@ -69,40 +72,41 @@ async def u_offers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ये है वो हिस्सा जहाँ से रेडायरेक्ट लिंक को छोड़कर सभी in-app ब्राउज़र मे खुलते है विथ थ्री डॉट आपने ब्राउज़र ऑप्शन
 # इस हिस्से को कमैंट्स आउट कर दो और इसके निचे वाले को कमेंट कार दो आपका पहले वाला कोड चल जायेगा
+#async def u_det(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#    query = update.callback_query
+#    oid = query.data.split('_')[2]
+ #   o = db_query("SELECT name, status, prize, steps, terms, claim_link, track_link FROM offers WHERE id=?", (oid,), fetch=True)[0]
+#    txt = f"📌 **{o[0]}**\n💰 Prize: ₹{o[2]}\nStatus: {o[1]}\n\n📝 **Steps:**\n{o[3]}\n\n⚠️ **Terms:**\n{o[4]}"
+#    btns = [[InlineKeyboardButton("🚀 Claim", url=o[5]), InlineKeyboardButton("📍 Track", url=o[6])],
+ #           [InlineKeyboardButton("🔙 Back", callback_data='u_offers')]]
+#    await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(btns), parse_mode='Markdown')
+    
+#यहां तक है inapp ब्राउज़र का कोड और अब एडिटेड mongodb 👇
 async def u_det(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     oid = query.data.split('_')[2]
-    o = db_query("SELECT name, status, prize, steps, terms, claim_link, track_link FROM offers WHERE id=?", (oid,), fetch=True)[0]
-    txt = f"📌 **{o[0]}**\n💰 Prize: ₹{o[2]}\nStatus: {o[1]}\n\n📝 **Steps:**\n{o[3]}\n\n⚠️ **Terms:**\n{o[4]}"
-    btns = [[InlineKeyboardButton("🚀 Claim", url=o[5]), InlineKeyboardButton("📍 Track", url=o[6])],
+    
+    # SQLite की जगह MongoDB से डेटा लेना
+    o = get_offer_by_id(oid)
+    
+    if not o:
+        await query.answer("Offer not found in MongoDB!", show_alert=True)
+        return
+
+    # o[0] की जगह अब o['name'] जैसे शब्दों का इस्तेमाल होगा
+    txt = (f"📌 **{o['name']}**\n"
+           f"💰 Prize: ₹{o['prize']}\n"
+           f"Status: {o['status']}\n\n"
+           f"📝 **Steps:**\n{o['steps']}\n\n"
+           f"⚠️ **Terms:**\n{o['terms']}")
+    
+    # सीधा URL बटन
+    btns = [[InlineKeyboardButton("🚀 Claim", url=o['claim_link']), 
+             InlineKeyboardButton("📍 Track", url=o['track_link'])],
             [InlineKeyboardButton("🔙 Back", callback_data='u_offers')]]
+    
     await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(btns), parse_mode='Markdown')
-
-#ये है जो सबको चाहे रेडायरेक्ट url ही हो यूज़ in app मे खोलेगा
-#async def u_det(update: Update, context: ContextTypes.DEFAULT_TYPE):
- #   query = update.callback_query
- #   oid = query.data.split('_')[2]
-    # डेटाबेस से जानकारी उठाना
-#    o = db_query("SELECT name, status, prize, steps, terms, claim_link, track_link FROM offers WHERE id=?", (oid,), fetch=True)[0]
-    
-    # यहाँ जादुई लाइन है जो एडमिन पैनल के किसी भी लिंक को In-App Browser के लिए तैयार कर देगी
-#    claim_link = f"https://www.google.com/url?q={o[5]}"
-#    track_link = f"https://www.google.com/url?q={o[6]}"
-
-#    txt = (f"📌 **{o[0]}**\n"
-#           f"💰 Prize: ₹{o[2]}\n"
- #          f"💠 Status: {o[1]}\n\n"
- #          f"📝 **Steps:**\n{o[3]}\n\n"
- #          f"⚠️ **Terms:**\n{o[4]}")
-    
-    # 'url=' इस्तेमाल करने से बटन पर 'तीर' का आइकॉन आएगा और 3-dot मेनू खुलेगा
- #   btns = [
-   #     [InlineKeyboardButton("🚀 Claim", url=claim_link), 
-  #       InlineKeyboardButton("📍 Track", url=track_link)],
-  #      [InlineKeyboardButton("🔙 Back to List", callback_data='u_offers')]
- #   ]
-#    await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(btns), parse_mode='Markdown')
-#यहां तक है inapp ब्राउज़र का कोड 
+#यहां तक mongodb 
 
 # --- SUBMIT PROOF FLOW ---
 async def u_sub_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -174,10 +178,22 @@ async def a_cli(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def a_fin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     d = context.user_data
-    db_query("INSERT INTO offers (name,status,expiry,prize,steps,terms,claim_link,track_link) VALUES (?,?,?,?,?,?,?,?)",
-             (d['n_name'],d['n_st'],d['n_ex'],d['n_pr'],d['n_step'],d['n_term'],d['n_cl'],update.message.text))
-    await update.message.reply_text("✅ ऑफर जुड़ गया!", reply_markup=admin_kb())
+    t_link = update.message.text
+    
+    # एक यूनिक आईडी बनाने के लिए (ताकि MongoDB में सेव हो सके)
+    import time
+    oid = str(int(time.time())) 
+
+    # 1. पुराने SQLite में सेव (जैसा पहले था)
+    db_query("INSERT INTO offers (id, name,status,expiry,prize,steps,terms,claim_link,track_link) VALUES (?,?,?,?,?,?,?,?,?)",
+             (oid, d['n_name'],d['n_st'],d['n_ex'],d['n_pr'],d['n_step'],d['n_term'],d['n_cl'],t_link))
+    
+    # 2. नई लाइन: MongoDB में परमानेंट सेव करना
+    save_offer(oid, d['n_name'], d['n_st'], d['n_pr'], d['n_step'], d['n_term'], d['n_cl'], t_link)
+
+    await update.message.reply_text("✅ ऑफर जुड़ गया और MongoDB में सुरक्षित है!", reply_markup=admin_kb())
     return ConversationHandler.END
+
 
 # --- ADMIN: PROOF REVIEW ---
 async def a_proofs(update: Update, context: ContextTypes.DEFAULT_TYPE):
