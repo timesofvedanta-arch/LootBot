@@ -67,14 +67,42 @@ async def u_offers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     btns.append([InlineKeyboardButton("🔙 Back", callback_data='home')])
     await query.edit_message_text("🎁 **ऑफर लिस्ट:**", reply_markup=InlineKeyboardMarkup(btns))
 
+# ये है वो हिस्सा जहाँ से रेडायरेक्ट लिंक को छोड़कर सभी in-app ब्राउज़र मे खुलते है विथ थ्री डॉट आपने ब्राउज़र ऑप्शन
+# इस हिस्से को कमैंट्स आउट कर दो और इसके निचे वाले को कमेंट कार दो आपका पहले वाला कोड चल जायेगा
+#async def u_det(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#    query = update.callback_query
+#    oid = query.data.split('_')[2]
+#    o = db_query("SELECT name, status, prize, steps, terms, claim_link, track_link FROM offers WHERE id=?", (oid,), fetch=True)[0]
+#    txt = f"📌 **{o[0]}**\n💰 Prize: ₹{o[2]}\nStatus: {o[1]}\n\n📝 **Steps:**\n{o[3]}\n\n⚠️ **Terms:**\n{o[4]}"
+#    btns = [[InlineKeyboardButton("🚀 Claim", url=o[5]), InlineKeyboardButton("📍 Track", url=o[6])],
+#            [InlineKeyboardButton("🔙 Back", callback_data='u_offers')]]
+#    await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(btns), parse_mode='Markdown')
+
+#ये है जो सबको चाहे रेडायरेक्ट url ही हो यूज़ in app मे खोलेगा
 async def u_det(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     oid = query.data.split('_')[2]
+    # डेटाबेस से जानकारी उठाना
     o = db_query("SELECT name, status, prize, steps, terms, claim_link, track_link FROM offers WHERE id=?", (oid,), fetch=True)[0]
-    txt = f"📌 **{o[0]}**\n💰 Prize: ₹{o[2]}\nStatus: {o[1]}\n\n📝 **Steps:**\n{o[3]}\n\n⚠️ **Terms:**\n{o[4]}"
-    btns = [[InlineKeyboardButton("🚀 Claim", url=o[5]), InlineKeyboardButton("📍 Track", url=o[6])],
-            [InlineKeyboardButton("🔙 Back", callback_data='u_offers')]]
+    
+    # यहाँ जादुई लाइन है जो एडमिन पैनल के किसी भी लिंक को In-App Browser के लिए तैयार कर देगी
+    claim_link = f"https://www.google.com/url?q={o[5]}"
+    track_link = f"https://www.google.com/url?q={o[6]}"
+
+    txt = (f"📌 **{o[0]}**\n"
+           f"💰 Prize: ₹{o[2]}\n"
+           f"💠 Status: {o[1]}\n\n"
+           f"📝 **Steps:**\n{o[3]}\n\n"
+           f"⚠️ **Terms:**\n{o[4]}")
+    
+    # 'url=' इस्तेमाल करने से बटन पर 'तीर' का आइकॉन आएगा और 3-dot मेनू खुलेगा
+    btns = [
+        [InlineKeyboardButton("🚀 Claim", url=claim_link), 
+         InlineKeyboardButton("📍 Track", url=track_link)],
+        [InlineKeyboardButton("🔙 Back to List", callback_data='u_offers')]
+    ]
     await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(btns), parse_mode='Markdown')
+#यहां तक है inapp ब्राउज़र का कोड 
 
 # --- SUBMIT PROOF FLOW ---
 async def u_sub_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
