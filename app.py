@@ -6,7 +6,7 @@ from telegram.ext import (
     CallbackQueryHandler, MessageHandler, filters, ConversationHandler
 )
 
-# --- MONGODB CONNECTION ---
+# --- MONGODB CONNECTION (Direct Integration) ---
 from pymongo import MongoClient
 MONGO_URL = "mongodb+srv://admin:Mk626425@lootcampainbot.5bzimnz.mongodb.net/?appName=Lootcampainbot"
 client = MongoClient(MONGO_URL)
@@ -18,13 +18,13 @@ ADMIN_ID = 1216607288
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 DB_NAME = "timesofvedanta.db"
 
-# States (Exact 13 as per your Zip)
+# States (Exact 13 as per your Zip file)
 (A_NAME, A_STATUS, A_EXPIRY, A_PRIZE, A_STEPS, A_TERMS, A_CLINK, A_TLINK, 
  U_SEL_OFF, U_SCREEN, U_UPI, E_SEL, E_VAL) = range(13)
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# --- DATABASE (For Users/Submissions) ---
+# --- DATABASE (Only for Submissions) ---
 def db_query(query, params=(), fetch=False):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -38,7 +38,7 @@ def init_db():
     db_query('''CREATE TABLE IF NOT EXISTS submissions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, offer_name TEXT, upi TEXT, photo_id TEXT, status TEXT DEFAULT 'Pending')''')
     db_query('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, upi_id TEXT)''')
 
-# --- KEYBOARDS (Untouched) ---
+# --- KEYBOARDS (Same as Your Original) ---
 def user_kb(uid):
     btns = [[InlineKeyboardButton("🔥 Offer List", callback_data='u_offers')],
             [InlineKeyboardButton("📤 Submit Proof", callback_data='u_sub_start')],
@@ -54,18 +54,18 @@ def admin_kb():
         [InlineKeyboardButton("🔙 Back", callback_data='home')]
     ])
 
-# --- START ---
+# --- FUNCTIONS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     db_query("INSERT OR IGNORE INTO users (id) VALUES (?)", (uid,))
     await update.message.reply_text("🚀 **TIMESOFVEDANTA** सक्रिय है!", reply_markup=user_kb(uid), parse_mode='Markdown')
 
-# --- OFFERS (Now Fetching from MongoDB) ---
 async def u_offers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    # Fetching from MongoDB instead of SQL
     offers = list(offers_col.find({}))
     if not offers:
-        await query.edit_message_text("❌ कोई ऑफर उपलब्ध नहीं है।", reply_markup=user_kb(query.from_user.id))
+        await query.edit_message_text("❌ अभी कोई एक्टिव ऑफर नहीं है।", reply_markup=user_kb(query.from_user.id))
         return
     btns = [[InlineKeyboardButton(f"{o['name']} | {'🟢' if o['status']=='Active' else '🟡'} | ₹{o['prize']}", callback_data=f"u_det_{o['id']}")] for o in offers]
     btns.append([InlineKeyboardButton("🔙 Back", callback_data='home')])
@@ -74,6 +74,7 @@ async def u_offers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def u_det(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     oid = query.data.split('_')[2]
+    # Fetch details from MongoDB
     o = offers_col.find_one({"id": str(oid)})
     if not o:
         await query.answer("Offer not found!")
@@ -84,7 +85,7 @@ async def u_det(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔙 Back", callback_data='u_offers')]]
     await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(btns), parse_mode='Markdown')
 
-# --- ADMIN FLOW (Same as Your Zip) ---
+# --- ADMIN ADD FLOW ---
 async def a_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.message.reply_text("1️⃣ नाम:")
     return A_NAME
@@ -127,11 +128,12 @@ async def a_cli(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def a_fin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     d = context.user_data
     oid = str(int(time.time()))
+    # Saving to MongoDB
     offers_col.update_one({"name": d['n_name']}, {"$set": {"id": oid, "name": d['n_name'], "status": d['n_st'], "expiry": d['n_ex'], "prize": d['n_pr'], "steps": d['n_step'], "terms": d['n_term'], "claim_link": d['n_cl'], "track_link": update.message.text}}, upsert=True)
-    await update.message.reply_text("✅ सेव हो गया!", reply_markup=admin_kb())
+    await update.message.reply_text("✅ ऑफर सफलतापूर्वक MongoDB में सेव हो गया!", reply_markup=admin_kb())
     return ConversationHandler.END
 
-# --- HANDLER ---
+# --- CALLBACK HANDLER ---
 async def global_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     d = q.data
@@ -146,7 +148,7 @@ async def global_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("🗑 डिलीट करें:", reply_markup=InlineKeyboardMarkup(btns))
     elif d.startswith('del_'):
         offers_col.delete_one({"id": d.split('_')[1]})
-        await q.answer("Done!")
+        await q.answer("Deleted!")
         await q.edit_message_text("🛠 एडमिन पैनल:", reply_markup=admin_kb())
     elif d == 'a_status':
         offers = list(offers_col.find({}))
@@ -175,7 +177,7 @@ async def global_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(d.split('_')[2], "❌ रिजेक्ट हो गया।")
         await q.delete_message()
 
-# --- SUBMIT PROOF FLOW ---
+# --- SUBMIT PROOF ---
 async def u_sub_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     offers = list(offers_col.find({"status": "Active"}))
     if not offers:
