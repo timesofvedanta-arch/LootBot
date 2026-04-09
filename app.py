@@ -36,7 +36,7 @@ def init_db():
 def user_kb(uid):
     btns = [[InlineKeyboardButton("🔥 Offer List", callback_data='u_offers')],
             [InlineKeyboardButton("📤 Submit Proof", callback_data='u_sub_start'),
-             InlineKeyboardButton("📱 Contact Us", url="https://wa.me/YOUR_NUMBER")]]
+             InlineKeyboardButton("📱 Contact Us", url="https://wa.me/8955399449")]]
     if uid == ADMIN_ID: btns.append([InlineKeyboardButton("🛠 Admin Panel", callback_data='a_panel')])
     return InlineKeyboardMarkup(btns)
 
@@ -72,7 +72,7 @@ async def u_det(update: Update, context: ContextTypes.DEFAULT_TYPE):
     oid = query.data.split('_')[2]
     o = db_query("SELECT name, status, prize, steps, terms, claim_link, track_link FROM offers WHERE id=?", (oid,), fetch=True)[0]
     txt = f"📌 **{o[0]}**\n💰 Prize: ₹{o[2]}\nStatus: {o[1]}\n\n📝 **Steps:**\n{o[3]}\n\n⚠️ **Terms:**\n{o[4]}"
-    btns = [[InlineKeyboardButton("🚀 Claim", web_app=WebAppInfo(url=o[5])), InlineKeyboardButton("📍 Track", web_app=WebAppInfo(url=o[6]))],
+    btns = [[InlineKeyboardButton("🚀 Claim", url=o[5]), InlineKeyboardButton("📍 Track", url=o[6])],
             [InlineKeyboardButton("🔙 Back", callback_data='u_offers')]]
     await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(btns), parse_mode='Markdown')
 
