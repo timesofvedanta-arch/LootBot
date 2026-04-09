@@ -2,7 +2,8 @@ from pymongo import MongoClient
 import os
 
 # MongoDB Connection (अपना लिंक यहाँ डालें)
-MONGO_URL = "mongodb+srv://user:password@cluster.mongodb.net/myDatabase?retryWrites=true&w=majority"
+#MONGO_URL = "mongodb+srv://user:password@cluster.mongodb.net/myDatabase?retryWrites=true&w=majority"
+MONGO_URL = "mongodb+srv://admin:Mk626425@lootcampainbot.5bzimnz.mongodb.net/?appName=Lootcampainbot"
 client = MongoClient(MONGO_URL)
 db = client['timesofvedanta_db']
 
