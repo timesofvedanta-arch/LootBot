@@ -7,7 +7,7 @@ from telegram.ext import (
 )
 
 # --- CONFIGURATION ---
-ADMIN_ID = 1216607288  # <--- अपनी ID यहाँ डालें
+ADMIN_ID = 1216607288  
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 DB_NAME = "timesofvedanta.db"
 
@@ -172,6 +172,34 @@ async def global_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif d.startswith('u_det_'): await u_det(update, context)
     elif d == 'a_panel': await q.edit_message_text("🛠 एडमिन पैनल:", reply_markup=admin_kb())
     elif d == 'a_proofs': await a_proofs(update, context)
+    
+    # --- DELETE OFFER LOGIC ---
+    elif d == 'a_del':
+        offers = db_query("SELECT id, name FROM offers", fetch=True)
+        if not offers:
+            await q.answer("❌ कोई ऑफर नहीं मिला!", show_alert=True)
+            return
+        btns = [[InlineKeyboardButton(f"🗑 {o[1]}", callback_data=f'execdel_{o[0]}')] for o in offers]
+        btns.append([InlineKeyboardButton("🔙 Back", callback_data='a_panel')])
+        await q.edit_message_text("कौनसा ऑफर डिलीट करना चाहते हैं?", reply_markup=InlineKeyboardMarkup(btns))
+        
+    elif d.startswith('execdel_'):
+        oid = d.split('_')[1]
+        db_query("DELETE FROM offers WHERE id=?", (oid,))
+        await q.answer("✅ डिलीट हो गया!")
+        await q.edit_message_text("ऑफर हटा दिया गया है।", reply_markup=admin_kb())
+
+    # --- STATUS LOGIC ---
+    elif d == 'a_status':
+        offers = db_query("SELECT name, status FROM offers", fetch=True)
+        if not offers:
+            await q.edit_message_text("अभी कोई ऑफर लिस्ट में नहीं है।", reply_markup=admin_kb())
+            return
+        txt = "📊 **ऑफर स्टेटस:**\n\n"
+        for o in offers:
+            txt += f"🔹 {o[0]}: {o[1]}\n"
+        await q.edit_message_text(txt, reply_markup=admin_kb(), parse_mode='Markdown')
+
     elif d.startswith('apr_'):
         sid, usr = d.split('_')[1], d.split('_')[2]
         db_query("UPDATE submissions SET status='Approved' WHERE id=?", (sid,))
