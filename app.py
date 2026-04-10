@@ -167,13 +167,19 @@ async def global_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     d = q.data
     uid = q.from_user.id
-    if d == 'home': await q.edit_message_text("मुख्य मेनू:", reply_markup=user_kb(uid))
-    elif d == 'u_offers': await u_offers(update, context)
-    elif d.startswith('u_det_'): await u_det(update, context)
-    elif d == 'a_panel': await q.edit_message_text("🛠 एडमिन पैनल:", reply_markup=admin_kb())
-    elif d == 'a_proofs': await a_proofs(update, context)
+
+    if d == 'home': 
+        await q.edit_message_text("मुख्य मेनू:", reply_markup=user_kb(uid))
+    elif d == 'u_offers': 
+        await u_offers(update, context)
+    elif d.startswith('u_det_'): 
+        await u_det(update, context)
+    elif d == 'a_panel': 
+        await q.edit_message_text("🛠 एडमिन पैनल:", reply_markup=admin_kb())
+    elif d == 'a_proofs': 
+        await a_proofs(update, context)
     
-    # --- DELETE OFFER LOGIC ---
+    # --- DELETE & STATUS LOGIC (FIXED) ---
     elif d == 'a_del':
         offers = db_query("SELECT id, name FROM offers", fetch=True)
         if not offers:
@@ -189,7 +195,6 @@ async def global_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("✅ डिलीट हो गया!")
         await q.edit_message_text("ऑफर हटा दिया गया है।", reply_markup=admin_kb())
 
-    # --- STATUS LOGIC ---
     elif d == 'a_status':
         offers = db_query("SELECT name, status FROM offers", fetch=True)
         if not offers:
