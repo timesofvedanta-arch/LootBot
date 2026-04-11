@@ -1,2 +1,5 @@
 python-telegram-bot==20.8
-
+pymongo[srv]
+requests
+beautifulsoup4
+playwright
