@@ -1,18 +1,27 @@
-# Playwright की ऑफिशियल इमेज जिसमें ब्राउज़र और Python पहले से हैं
+# Use Microsoft Playwright Python image
 FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
 
-# काम करने की जगह (Folder)
+LABEL maintainer="Mangal Kiran"
+
 WORKDIR /app
 
-# सारी फाइलें कॉपी करें
-COPY . /app
+# Copy requirements and install
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt \
+ && playwright install chromium
 
-# लाइब्रेरी इंस्टॉल करें
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy main code
+COPY main.py .
 
-# रेंडर के लिए पोर्ट सेट करें
-ENV PORT=8080
-EXPOSE 8080
+# Environment variables (पूरी तरह आपकी जानकारी के अनुसार)
+ENV PORT=10000
+ENV BOT_TOKEN=8797754610:AAHM-KFFsdNoBJa2VIfrew5uFvgwGvyL-uI
+ENV MONGO_URI=mongodb+srv://timesofvedanta:Mk626425@lootbot.ypsol8i.mongodb.net/?appName=Lootbot
+ENV WEBAPP_URL=https://lootbot-1.onrender.com
+ENV ADMIN_ID=1216607288
 
-# बोट चलाने की कमांड
+# Expose port
+EXPOSE $PORT
+
+# Run the bot
 CMD ["python", "main.py"]
