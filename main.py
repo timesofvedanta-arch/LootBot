@@ -10,7 +10,7 @@ from telebot import types
 from playwright.async_api import async_playwright
 
 # --- कॉन्फ़िगरेशन ---
-BOT_TOKEN = "8797754610:AAHwDu7n6d1U2Ma682BkIHD68k3vRlIwguQ"
+BOT_TOKEN = "8797754610:AAHM-KFFsdNoBJa2VIfrew5uFvgwGvyL-uI"
 MONGO_URI = "mongodb+srv://timesofvedanta:Mk626425@lootbot.ypsol8i.mongodb.net/?appName=Lootbot"
 ADMIN_ID = 1216607288
 
