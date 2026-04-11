@@ -1,4 +1,4 @@
 pyTelegramBotAPI
 pymongo[srv]
-playwright
 flask
+playwright
