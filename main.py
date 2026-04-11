@@ -1,34 +1,34 @@
 import os
 import logging
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import threading
+from flask import Flask
+from threading import Thread
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes
 from pymongo import MongoClient
 
-# आपकी जानकारी
+# --- रेंडर को धोखा देने के लिए छोटी सी वेबसाइट (Flask) ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run_web_server():
+    # रेंडर पोर्ट 10000 या 8080 मांगता है
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# --- आपकी जानकारी ---
 BOT_TOKEN = "8797754610:AAHwDu7n6d1U2Ma682BkIHD68k3vRlIwguQ"
 MONGO_URI = "mongodb+srv://timesofvedanta:Mk626425@lootbot.ypsol8i.mongodb.net/?appName=Lootbot"
 ADMIN_ID = 1216607288
-
-# --- रेंडर के लिए हेल्थ चेक सर्वर ---
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is Running")
-
-def run_health_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    server.serve_forever()
 
 # MongoDB कनेक्शन
 try:
     client = MongoClient(MONGO_URI, tlsAllowInvalidCertificates=True)
     db = client["loot_bot_db"]
     users_col = db["users"]
-    print("✅ MongoDB Connection Successful")
+    print("✅ MongoDB Connected")
 except Exception as e:
     print(f"❌ MongoDB Error: {e}")
 
@@ -42,13 +42,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not users_col.find_one({"_id": user.id}):
         users_col.insert_one({"_id": user.id, "name": user.first_name, "balance": 0, "status": "active"})
     
-    await update.message.reply_text(f"नमस्ते {user.first_name}! आपका बोट अब रेंडर पर लाइव है।", reply_markup=reply_markup)
+    await update.message.reply_text(f"नमस्ते {user.first_name}! आपका फ्री बोट अब लाइव है।", reply_markup=reply_markup)
 
 def main():
-    # हेल्थ चेक सर्वर को अलग धागे (Thread) में चलाएं
-    threading.Thread(target=run_health_server, daemon=True).start()
+    # 1. पहले वेब सर्वर को अलग धागे में शुरू करें
+    t = Thread(target=run_web_server)
+    t.start()
     
-    # बोट सेटअप
+    # 2. बोट शुरू करें
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     
